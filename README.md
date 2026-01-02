@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🦆 DuckType
+
+> A playful, question-driven chat app powered by Gemini AI and MongoDB. DuckType helps you think deeper by only asking questions—never giving answers!
+
+## Features
+
+- **Rubber Duck Debugging, Reinvented:** The AI only responds with thoughtful questions to help you reflect and solve your own problems.
+- **Active Conversation Memory:** Only the current chat is stored in MongoDB and loaded on refresh, so the Duck has memory of your ongoing session.
+- **Modern UI:** Clean, scrollable chat interface with the latest messages at the top.
+- **Powered by Gemini:** Uses Google Gemini API for creative, context-aware questioning.
+
+## Tech Stack
+
+- [Next.js 16 (App Router)](https://nextjs.org/)
+- [React 19](https://react.dev/)
+- [MongoDB](https://www.mongodb.com/)
+- [Tailwind CSS](https://tailwindcss.com/) (with custom variables)
+- [Google Gemini API](https://ai.google.dev/gemini-api)
 
 ## Getting Started
 
-First, run the development server:
+1. **Clone the repo:**
+   ```bash
+   git clone https://github.com/SaigeDruidNub/ducktype.git
+   cd ducktype
+   ```
+2. **Install dependencies:**
+   ```bash
+   npm install
+   # or yarn or pnpm
+   ```
+3. **Set up environment variables:**
+   - Create a `.env.local` file in the root directory.
+   - Add your MongoDB URI and Gemini API key:
+     ```env
+     MONGODB_URI=your_mongodb_connection_string
+     GEMINI_API_KEY=your_gemini_api_key
+     ```
+4. **Run the development server:**
+   ```bash
+   npm run dev
+   ```
+5. **Open the app:**
+   Visit [http://localhost:3000](http://localhost:3000) in your browser.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Usage
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. Type a question or comment in the input box.
+2. The Duck (AI) will respond with 1–2 questions to help you think deeper.
+3. All messages are saved and shown with the newest at the top.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `app/` — Next.js app directory (pages, API routes, UI)
+- `lib/mongodb.ts` — MongoDB connection helper
+- `types/message.ts` — TypeScript message type
+- `public/` — Static assets (logo, etc.)
 
-## Learn More
+## Contributing
 
-To learn more about Next.js, take a look at the following resources:
+Pull requests and issues are welcome! Please open an issue to discuss your idea or bug before submitting a PR.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT

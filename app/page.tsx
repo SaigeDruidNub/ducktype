@@ -136,7 +136,7 @@ export default function Home() {
             <div key={idx} style={{ marginBottom: 24 }}>
               <div
                 style={{
-                  color: "var(--color-primary-yellow)",
+                  color: "var(--color-insight-accent)",
                   fontWeight: 600,
                   marginBottom: 4,
                 }}
@@ -150,7 +150,7 @@ export default function Home() {
               </div>
               <div
                 style={{
-                  color: "var(--color-insight-accent)",
+                  color: "var(--color-primary-yellow)",
                   fontWeight: 500,
                   marginBottom: 4,
                 }}
