@@ -1,10 +1,48 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import type { Message } from "../types/message";
 import Image from "next/image";
 import { askGemini } from "./gemini";
 
 export default function Home() {
+  type LocalMessage = Message | { user: string; ai: string[] };
+
   const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/messages");
+        if (res.ok) {
+          const data = await res.json();
+          setMessages(data);
+        }
+      } catch (err) {
+        console.error("Failed to load messages", err);
+      }
+    })();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    const aiResponse = mockDuckAI(input);
+    // optimistic update
+    setMessages((prev) => [{ user: input, ai: aiResponse }, ...prev]);
+    setInput("");
+
+    try {
+      await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: input, ai: aiResponse }),
+      });
+      // optionally re-fetch to get server data
+      // const res = await fetch('/api/messages'); const data = await res.json(); setMessages(data);
+    } catch (err) {
+      console.error("Failed to save message", err);
+    }
   const [messages, setMessages] = useState<{ user: string; ai: string[] }[]>(
     []
   );
