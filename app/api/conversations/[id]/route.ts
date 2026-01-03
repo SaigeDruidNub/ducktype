@@ -8,7 +8,32 @@ export async function PATCH(req: Request, { params }: { params: any }) {
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
     if (!userId)
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-    const { text } = await req.json();
+
+    const body = await req.json();
+
+    // Update title if provided
+    if (typeof body.title === "string") {
+      const title = body.title.trim();
+      const oid = new ObjectId(id);
+      const client = await clientPromise;
+      const db = client.db("ducktype");
+      const now = new Date();
+      const result = await db
+        .collection("conversations")
+        .findOneAndUpdate(
+          { _id: oid, userId },
+          { $set: { title, updatedAt: now } },
+          { returnDocument: "after" }
+        );
+      const conv = (result && "value" in result ? result.value : result) || null;
+      if (!conv) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      return NextResponse.json({ title: conv.title });
+    }
+
+    // Otherwise handle Aha Moment update
+    const { text } = body;
     if (!text || typeof text !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid text" },
