@@ -3,7 +3,10 @@ import { MongoClient, MongoClientOptions } from "mongodb";
 const uri = process.env.MONGODB_URI;
 if (!uri) throw new Error("Please add MONGODB_URI to .env.local (or set MONGODB_URI)");
 
-const options: MongoClientOptions = {};
+const options: MongoClientOptions = {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 10000,
+};
 
 let client: MongoClient;
 let clientPromise: Promise<MongoClient>;

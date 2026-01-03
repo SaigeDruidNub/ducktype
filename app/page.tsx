@@ -1,8 +1,8 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { Message } from "../types/message";
 import Image from "next/image";
-import { askGemini, GeminiMessage } from "./gemini";
+import { askGemini, GeminiMessage, generateTitle } from "./gemini";
 
 export default function Home() {
   const [ahaModal, setAhaModal] = useState(false);
@@ -27,8 +27,77 @@ export default function Home() {
   const [activeConv, setActiveConv] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
+
+  // Rotating loading message while Gemini is processing
+  const loadingMessages = [
+    "Duck is thinking...",
+    "Duck is formulating questions...",
+    "Duck is brainstorming...",
+  ];
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (loading) {
+      timer = setInterval(() => {
+        setLoadingMessageIndex((i) => (i + 1) % loadingMessages.length);
+      }, 1000);
+    } else {
+      setLoadingMessageIndex(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [loading]);
+
+  // Starter prompts state
+  const [starterPrompts, setStarterPrompts] = useState<string[]>([]);
+  const [promptsVisible, setPromptsVisible] = useState(false);
+  const [loadingPrompts, setLoadingPrompts] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Inline title editing state
+  const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
+  const [editTitleValue, setEditTitleValue] = useState("");
+  const [editingSaving, setEditingSaving] = useState(false);
+
+  const saveConversationTitle = async (id: string) => {
+    setEditingSaving(true);
+    try {
+      const res = await fetch(`/api/conversations/${id}?userId=${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editTitleValue.trim() }),
+      });
+      if (!res.ok) throw new Error("Failed to save title");
+      setConversations((prev) => prev.map((c) => (c._id === id ? { ...c, title: editTitleValue.trim(), updatedAt: new Date().toISOString() } : c)));
+      setEditingTitleId(null);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to update title");
+    } finally {
+      setEditingSaving(false);
+    }
+  };
+
+  const loadConversation = async (id: string) => {
+    try {
+      setActiveConv(id);
+      const res = await fetch(`/api/conversations/${id}?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages ?? []);
+        setAhaMoment(data.ahaMoment ?? null);
+      } else {
+        setMessages([]);
+        setAhaMoment(null);
+      }
+    } catch (err) {
+      console.error("Failed to load conversation messages", err);
+      setMessages([]);
+      setAhaMoment(null);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -37,7 +106,9 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           setConversations(data);
-          if (data.length) setActiveConv(data[0]._id);
+          if (data.length) {
+            await loadConversation(data[0]._id);
+          }
         }
       } catch (err) {
         console.error("Failed to load conversations", err);
@@ -45,23 +116,7 @@ export default function Home() {
     })();
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      if (!activeConv) return;
-      try {
-        const res = await fetch(
-          `/api/conversations/${activeConv}?userId=${userId}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(data.messages ?? []);
-          setAhaMoment(data.ahaMoment ?? null);
-        }
-      } catch (err) {
-        console.error("Failed to load conversation messages", err);
-      }
-    })();
-  }, [activeConv]);
+
   const handleAhaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ahaInput.trim() || !activeConv) return;
@@ -90,7 +145,7 @@ export default function Home() {
       const res = await fetch("/api/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title || "New conversation", userId }),
+        body: JSON.stringify({ title: title || "", userId }),
       });
       const body = await res.json();
       if (body.insertedId) {
@@ -107,20 +162,21 @@ export default function Home() {
     }
   };
 
-  const handleNewConversation = () => {
-    setNewTitle("");
-    setShowModal(true);
+  const handleNewConversation = async () => {
+    // Create a new conversation and ask Gemini to generate a concise title
+    try {
+      await createConversation("");
+    } catch (e) {
+      console.error("Failed to create new conversation", e);
+    }
   };
 
-  const handleModalSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setShowModal(false);
-    await createConversation(newTitle.trim());
-  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
+  const sendMessage = async (text: string) => {
+    if (!text.trim()) return;
+
+    const wasEmpty = messages.length === 0;
+
     if (!activeConv) {
       await createConversation("");
     }
@@ -145,23 +201,45 @@ export default function Home() {
             })),
           ];
         }),
-        { role: "user" as const, parts: [{ text: input }] },
+        { role: "user" as const, parts: [{ text }] },
       ];
 
       const aiResponse = await askGemini(conversation);
       const newMsg = {
-        user: input,
+        user: text,
         ai: aiResponse,
         createdAt: new Date().toISOString(),
       };
       // optimistic update
       setMessages((prev) => [...prev, newMsg]);
+      // if this was the first message, hide starter prompts (conversation started)
+      if (wasEmpty) setPromptsVisible(false);
 
       await fetch(`/api/conversations/${activeConv}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user: input, ai: aiResponse, userId }),
+        body: JSON.stringify({ user: text, ai: aiResponse, userId }),
       });
+
+      // If this was the first message, generate a title from it and save it
+      if (wasEmpty) {
+        const generated = await generateTitle(text);
+        if (generated) {
+          try {
+            await fetch(`/api/conversations/${activeConv}?userId=${userId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: generated }),
+            });
+            // update local conversations list
+            setConversations((prev) =>
+              prev.map((c) => (c._id === activeConv ? { ...c, title: generated } : c))
+            );
+          } catch (e) {
+            console.error("Failed to update conversation title", e);
+          }
+        }
+      }
 
       // refresh conversations list updatedAt
       const convs = await (
@@ -174,6 +252,11 @@ export default function Home() {
     }
     setInput("");
     setLoading(false);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await sendMessage(input);
   };
 
   return (
@@ -213,95 +296,7 @@ export default function Home() {
             >
               New
             </button>
-            {showModal && (
-              <div
-                style={{
-                  position: "fixed",
-                  top: 0,
-                  left: 0,
-                  width: "100vw",
-                  height: "100vh",
-                  background: "rgba(0,0,0,0.4)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  zIndex: 1000,
-                }}
-              >
-                <form
-                  onSubmit={handleModalSubmit}
-                  style={{
-                    background: "#23283a",
-                    padding: 32,
-                    borderRadius: 16,
-                    boxShadow: "0 8px 32px #0006",
-                    minWidth: 320,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 16,
-                    alignItems: "stretch",
-                  }}
-                >
-                  <label
-                    style={{ color: "#fff", fontWeight: 600, fontSize: 18 }}
-                  >
-                    Conversation Title
-                  </label>
-                  <input
-                    autoFocus
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="Enter a title..."
-                    style={{
-                      padding: 12,
-                      borderRadius: 8,
-                      border: "none",
-                      fontSize: 16,
-                      marginBottom: 8,
-                    }}
-                    maxLength={60}
-                  />
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 12,
-                      justifyContent: "flex-end",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setShowModal(false)}
-                      style={{
-                        background: "#444a",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 8,
-                        padding: "8px 18px",
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      style={{
-                        background: "var(--color-primary-yellow)",
-                        color: "#151C2F",
-                        border: "none",
-                        borderRadius: 8,
-                        padding: "8px 18px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                      disabled={!newTitle.trim()}
-                    >
-                      Create
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
+
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {conversations.map((c) => (
@@ -309,9 +304,9 @@ export default function Home() {
                 key={c._id}
                 role="button"
                 tabIndex={0}
-                onClick={() => setActiveConv(c._id)}
+                onClick={() => loadConversation(c._id)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") setActiveConv(c._id);
+                  if (e.key === "Enter" || e.key === " ") loadConversation(c._id);
                 }}
                 style={{
                   textAlign: "left",
@@ -327,13 +322,49 @@ export default function Home() {
                   userSelect: "none",
                 }}
               >
-                <div style={{ fontWeight: 600 }}>
-                  {c.title ?? "Conversation"}
-                </div>
-                <div
-                  style={{ fontSize: 12, color: "var(--color-secondary-text)" }}
-                >
-                  {new Date(c.updatedAt ?? c.createdAt).toLocaleString()}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                  {editingTitleId === c._id ? (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!editTitleValue.trim()) return;
+                        await saveConversationTitle(c._id);
+                      }}
+                      style={{ display: "flex", gap: 8, alignItems: "center", width: "100%" }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        value={editTitleValue}
+                        onChange={(e) => setEditTitleValue(e.target.value)}
+                        style={{ flex: 1, padding: 6, borderRadius: 6, border: "1px solid #ccc" }}
+                        autoFocus
+                        maxLength={80}
+                      />
+                      <button type="submit" disabled={editingSaving} style={{ padding: "6px 8px", borderRadius: 6 }}>
+                        {editingSaving ? "Saving..." : "Save"}
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setEditingTitleId(null); }} style={{ padding: "6px 8px", borderRadius: 6 }}>
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <div style={{ fontWeight: 600 }}>
+                        {c.title ?? "Conversation"}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 12, color: "var(--color-secondary-text)", marginRight: 8 }}>
+                          {new Date(c.updatedAt ?? c.createdAt).toLocaleString()}
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditingTitleId(c._id); setEditTitleValue(c.title ?? ""); }}
+                          style={{ background: "transparent", border: "none", color: "var(--color-primary-yellow)", cursor: "pointer", padding: 0 }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div style={{ marginTop: 6 }}>
                   <span
@@ -348,7 +379,7 @@ export default function Home() {
                       )
                         return;
                       try {
-                        const res = await fetch(`/api/conversations/${c._id}`, {
+                        const res = await fetch(`/api/conversations/${c._id}?userId=${userId}`, {
                           method: "DELETE",
                         });
                         if (!res.ok) throw new Error("Delete failed");
@@ -374,7 +405,7 @@ export default function Home() {
                       )
                         return;
                       try {
-                        const res = await fetch(`/api/conversations/${c._id}`, {
+                        const res = await fetch(`/api/conversations/${c._id}?userId=${userId}`, {
                           method: "DELETE",
                         });
                         if (!res.ok) throw new Error("Delete failed");
@@ -612,38 +643,121 @@ export default function Home() {
           )}
           <form
             onSubmit={handleSubmit}
-            style={{ display: "flex", gap: 8, marginBottom: 24 }}
+            style={{ display: "flex", gap: 8, marginBottom: 8, flexDirection: "column" }}
           >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type your question or comment..."
-              style={{
-                flex: 1,
-                padding: 12,
-                borderRadius: 8,
-                border: "none",
-                background: "var(--color-bg)",
-                color: "var(--color-primary-text)",
-              }}
-              disabled={loading}
-            />
-            <button
-              type="submit"
-              style={{
-                background: "var(--color-primary-yellow)",
-                color: "#151C2F",
-                border: "none",
-                borderRadius: 8,
-                padding: "0 20px",
-                fontWeight: 700,
-                opacity: loading ? 0.6 : 1,
-                cursor: loading ? "not-allowed" : "pointer",
-              }}
-              disabled={loading}
-            >
-              {loading ? "Thinking..." : "Ask"}
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                ref={inputRef}
+                value={input}
+                onFocus={async () => {
+                  // Only show starter prompts if this conversation has no messages yet
+                  // Show suggestions only if there are no messages in this conversation
+                  if (!messages || messages.length === 0) {
+                    setPromptsVisible(true);
+                    if (starterPrompts.length === 0 && !loadingPrompts) {
+                      setLoadingPrompts(true);
+                      // include recent conversations as context when available
+                      const recent = (conversations || [])
+                        .filter((cc) => cc._id !== activeConv)
+                        .slice(0, 3)
+                        .map((cc) => ({
+                          title: cc.title,
+                          lastMessage:
+                            (Array.isArray(cc.messages) && cc.messages.length
+                              ? cc.messages[cc.messages.length - 1].user
+                              : "") || "",
+                        }));
+
+                      const mod = await import("./gemini");
+                      const p = await mod.getStarterPrompts({ recentConversations: recent });
+
+                      // client-side fallback if Gemini returned nothing
+                      const fallback = [
+                        "What's the main challenge I'm facing?",
+                        "How can I improve this idea?",
+                        "What am I missing in my approach?",
+                      ];
+
+                      setStarterPrompts((p && p.length ? p : fallback));
+                      setLoadingPrompts(false);
+                    }
+                  } else {
+                    setPromptsVisible(false);
+                  }
+                }}
+                onBlur={() => {
+                  // delay hide so clicks on prompts register
+                  setTimeout(() => setPromptsVisible(false), 150);
+                }}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Type your question or comment..."
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  borderRadius: 8,
+                  border: "none",
+                  background: "var(--color-bg)",
+                  color: "var(--color-primary-text)",
+                }}
+                disabled={loading}
+              />
+              <button
+                type="submit"
+                style={{
+                  background: "var(--color-primary-yellow)",
+                  color: "#151C2F",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "0 20px",
+                  fontWeight: 700,
+                  opacity: loading ? 0.6 : 1,
+                  cursor: loading ? "not-allowed" : "pointer",
+                }}
+                disabled={loading}
+              >
+                {loading ? "Thinking..." : "Ask"}
+              </button>
+            </div>
+
+            {promptsVisible && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                {loadingPrompts ? (
+                  <div style={{ color: "var(--color-secondary-text)" }}>Loading suggestions…</div>
+                ) : (
+                  (starterPrompts || []).map((p, i) => (
+                    <button
+                      key={i}
+                      onMouseDown={(e) => {
+                        // prevent input blur before click
+                        e.preventDefault();
+                        if (loading) return;
+                        setPromptsVisible(false);
+                        sendMessage(p);
+                      }}
+                      style={{
+                        background: "#f3f4f6",
+                        border: "1px solid #e5e7eb",
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        cursor: loading ? "not-allowed" : "pointer",
+                        fontSize: 13,
+                        color: "#111827",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {p}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Dynamic loading message shown while the Duck is thinking */}
+            {loading && (
+              <div style={{ color: "var(--color-secondary-text)", fontSize: 13, marginTop: 8 }} aria-live="polite">
+                {loadingMessages[loadingMessageIndex]}
+              </div>
+            )}
           </form>
           <div
             style={{
